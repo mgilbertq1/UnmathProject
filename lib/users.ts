@@ -3,10 +3,8 @@ import path from 'path';
 import { User, Badge, ShopItem, LevelProgress, LevelState, DailyRecord } from './types';
 import { TOTAL_LEVELS } from './levels/level-definitions';
 
-import os from 'os';
-
 const IS_VERCEL = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
-const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'unmath_data') : path.join(process.cwd(), 'data');
+const DATA_DIR = path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 const DEFAULT_BADGES: Badge[] = [
@@ -36,10 +34,14 @@ function makeLevelStates(): LevelState[] {
     })) as LevelState[];
 }
 
-// Gunakan memory store sebagai backup seandainya filesystem benar-benar tidak bisa ditulis
 let memoryUsersStore: User[] | null = null;
 
 function ensureDataDir() {
+    if (IS_VERCEL) {
+        if (!memoryUsersStore) memoryUsersStore = [];
+        return;
+    }
+    
     try {
         if (!fs.existsSync(DATA_DIR)) {
             fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -56,8 +58,8 @@ function ensureDataDir() {
 export function readUsers(): User[] {
     ensureDataDir();
 
-    if (memoryUsersStore !== null) {
-        return memoryUsersStore;
+    if (IS_VERCEL || memoryUsersStore !== null) {
+        return memoryUsersStore || [];
     }
 
     try {
@@ -89,7 +91,7 @@ export function readUsers(): User[] {
 export function writeUsers(users: User[]): void {
     ensureDataDir();
 
-    if (memoryUsersStore !== null) {
+    if (IS_VERCEL || memoryUsersStore !== null) {
         memoryUsersStore = users;
         return;
     }
