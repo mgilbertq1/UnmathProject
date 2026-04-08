@@ -3,7 +3,10 @@ import path from 'path';
 import { User, Badge, ShopItem, LevelProgress, LevelState, DailyRecord } from './types';
 import { TOTAL_LEVELS } from './levels/level-definitions';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+import os from 'os';
+
+const IS_VERCEL = process.env.VERCEL === '1' || process.env.VERCEL === 'true';
+const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'unmath_data') : path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 const DEFAULT_BADGES: Badge[] = [
@@ -33,40 +36,70 @@ function makeLevelStates(): LevelState[] {
     })) as LevelState[];
 }
 
+// Gunakan memory store sebagai backup seandainya filesystem benar-benar tidak bisa ditulis
+let memoryUsersStore: User[] | null = null;
+
 function ensureDataDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(USERS_FILE)) {
-        fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2));
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        if (!fs.existsSync(USERS_FILE)) {
+            fs.writeFileSync(USERS_FILE, JSON.stringify([], null, 2));
+        }
+    } catch (error) {
+        console.warn('Cannot write to file system, using memory store fallback.', error);
+        if (!memoryUsersStore) memoryUsersStore = [];
     }
 }
 
 export function readUsers(): User[] {
     ensureDataDir();
-    const raw = fs.readFileSync(USERS_FILE, 'utf-8');
-    const users = JSON.parse(raw) as User[];
 
-    // Migrasi: Tambahkan field default jika belum ada
-    return users.map(u => ({
-        ...u,
-        totalXP: u.totalXP ?? 0,
-        gems: u.gems ?? 50,
-        avatar: u.avatar ?? '🦊',
-        loginStreak: u.loginStreak ?? 0,
-        longestStreak: u.longestStreak ?? 0,
-        lastLoginDate: u.lastLoginDate ?? '',
-        dailyTarget: u.dailyTarget ?? 30,
-        levels: u.levels ?? { math: makeLevelStates(), pkn: makeLevelStates() },
-        dailyHistory: u.dailyHistory ?? [],
-        badges: u.badges ?? DEFAULT_BADGES,
-        shopItems: u.shopItems ?? DEFAULT_SHOP_ITEMS,
-    }));
+    if (memoryUsersStore !== null) {
+        return memoryUsersStore;
+    }
+
+    try {
+        const raw = fs.readFileSync(USERS_FILE, 'utf-8');
+        const users = JSON.parse(raw) as User[];
+
+        // Migrasi: Tambahkan field default jika belum ada
+        return users.map(u => ({
+            ...u,
+            totalXP: u.totalXP ?? 0,
+            gems: u.gems ?? 50,
+            avatar: u.avatar ?? '🦊',
+            loginStreak: u.loginStreak ?? 0,
+            longestStreak: u.longestStreak ?? 0,
+            lastLoginDate: u.lastLoginDate ?? '',
+            dailyTarget: u.dailyTarget ?? 30,
+            levels: u.levels ?? { math: makeLevelStates(), pkn: makeLevelStates() },
+            dailyHistory: u.dailyHistory ?? [],
+            badges: u.badges ?? DEFAULT_BADGES,
+            shopItems: u.shopItems ?? DEFAULT_SHOP_ITEMS,
+        }));
+    } catch (err) {
+        console.warn('Error reading file, falling back to memory store.');
+        memoryUsersStore = [];
+        return memoryUsersStore;
+    }
 }
 
 export function writeUsers(users: User[]): void {
     ensureDataDir();
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+
+    if (memoryUsersStore !== null) {
+        memoryUsersStore = users;
+        return;
+    }
+
+    try {
+        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+    } catch (err) {
+        console.warn('Error writing file, falling back to memory store.');
+        memoryUsersStore = users;
+    }
 }
 
 export function findUserByUsername(username: string): User | undefined {
